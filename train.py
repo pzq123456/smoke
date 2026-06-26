@@ -12,7 +12,7 @@ def main():
     model = YOLO("yolo26s.pt")
 
     model.train(
-        data="Smoking/data.yaml",
+        data="smoking2/data.yaml",
         epochs=300,
         patience=50,
         imgsz=640,
