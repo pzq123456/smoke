@@ -35,8 +35,7 @@ def main():
     script_dir = Path(__file__).parent
     
     # 模型路径：runs\detect\yolo26s_smoking_20260625_0033\weights\best.pt
-    # model_path = script_dir / "runs" / "detect" / "yolo26s_smoking_20260625_0033" / "weights" / "best.pt"
-    model_path = script_dir / "best.pt"
+    model_path = script_dir / "runs" / "detect" / "yolo26s_smoking_20260625_0033" / "weights" / "best.pt"
 
     
     # RTSP 视频地址（复用之前的地址）
