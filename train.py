@@ -7,16 +7,16 @@ def main():
     SETTINGS["tensorboard"] = True
     
     current_time = datetime.now().strftime("%Y%m%d_%H%M")
-    run_name = f"yolo26s_smoking_{current_time}"
+    run_name = f"yolo26m_smoking_{current_time}"
     
-    model = YOLO("yolo26s.pt")
+    model = YOLO("yolo26m.pt")
 
     model.train(
-        data="smoking2/data.yaml",
+        data="smoking4/data.yaml",
         epochs=300,
         patience=50,
         imgsz=640,
-        batch=128,
+        batch=64,
         device=-1,
         name=run_name,
         workers=8,
