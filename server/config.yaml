@@ -8,9 +8,10 @@
 # 模型参数
 # -----------------------------------------------------------------------------
 model:
-  path: "runs/detect/yolo26s_smoking_20260625_0033/weights/best.pt"   # YOLO 权重路径（相对于项目根目录）
+  path: "runs/detect/yolo26m_smoking_20260626_0601/weights/best.pt"   # YOLO 权重路径（相对于项目根目录）
   conf: 0.35                                                           # 置信度阈值
   device: 0                                                            # GPU 设备 ID，null 或 "cpu" 表示 CPU
+  target_classes: ['cigarette']                                        # 触发告警的目标类别（必须与模型类别名一致）
 
 # -----------------------------------------------------------------------------
 # 摄像头列表
@@ -37,7 +38,7 @@ cameras:
 alert:
   cooldown_seconds: 10           # 同一摄像头两次告警的最小间隔（秒）
   min_detection_count: 1         # 连续检测到抽烟的帧数阈值（防止单帧误报）
-  save_dir: "alerts"             # 关键帧保存目录（相对于项目根目录）
+  save_frame_overlay: false      # 是否在证据帧上叠加摄像头名称/时间水印（摄像头流已自带则无需）
 
   webhook:
     url: "http://localhost:9999/api/smoke-alert"   # Webhook 接收地址
@@ -48,5 +49,5 @@ alert:
 # 日志参数
 # -----------------------------------------------------------------------------
 log:
-  level: "INFO"        # DEBUG / INFO / WARNING / ERROR
-  file: null           # 日志文件路径，null 表示只输出到控制台
+  level: "INFO"                # DEBUG / INFO / WARNING / ERROR
+  file: "logs/server.log"      # 日志文件路径（JSON 格式，自动轮转 10MB，保留 30 天）

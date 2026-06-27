@@ -4,13 +4,11 @@ YOLO 模型封装
 - 提供结构化检测结果
 """
 
-import logging
 from pathlib import Path
 from dataclasses import dataclass
 
 from ultralytics import YOLO
-
-logger = logging.getLogger("smoke_detector.detector")
+from loguru import logger
 
 
 @dataclass
@@ -40,7 +38,7 @@ class SmokeDetector:
         if not model_path.exists():
             raise FileNotFoundError(f"模型文件不存在: {model_path}")
 
-        logger.info("加载模型: %s (device=%s, conf=%.2f)", model_path, device, conf)
+        logger.info("加载模型: {} (device={}, conf={:.2f})", model_path, device, conf)
         self._model = YOLO(str(model_path), task="detect")
         self._conf = conf
 

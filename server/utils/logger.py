@@ -1,60 +1,56 @@
 """
-结构化日志模块
-- 同时输出到控制台和文件
-- 统一格式: [时间] [级别] [模块] 消息
+日志模块 — 基于 loguru
+- 控制台彩色输出（开发友好）
+- 文件 JSON 结构化日志（生产持久化）
+- 自动轮转 + 压缩 + 过期清理
 """
 
-import logging
 import sys
 from pathlib import Path
+from loguru import logger
 
 
 def setup_logger(
     name: str = "smoke_detector",
     level: str = "INFO",
     log_file: str | None = None,
-) -> logging.Logger:
+):
     """
-    初始化并返回 logger 实例。
+    配置 loguru sinks。
 
     Args:
-        name: logger 名称
+        name: 日志标识（写入 extra 字段）
         level: 日志级别 (DEBUG/INFO/WARNING/ERROR)
-        log_file: 日志文件路径，None 表示只输出到控制台
-
-    Returns:
-        配置好的 Logger 实例
+        log_file: 文件日志路径，None 表示只输出到控制台
     """
-    logger = logging.getLogger(name)
+    logger.remove()  # 移除默认 sink
 
-    # 避免重复添加 handler
-    if logger.handlers:
-        return logger
-
-    logger.setLevel(getattr(logging, level.upper(), logging.INFO))
-
-    # 格式
-    fmt = logging.Formatter(
-        "[%(asctime)s] [%(levelname)-7s] [%(name)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+    # ── 控制台 sink：彩色文本，人类可读 ──
+    logger.add(
+        sys.stderr,
+        format=(
+            "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+            "<level>{level: <8}</level> | "
+            "<level>{message}</level>"
+        ),
+        level=level.upper(),
+        colorize=True,
     )
 
-    # 控制台 handler
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(fmt)
-    logger.addHandler(console_handler)
-
-    # 文件 handler（可选）
+    # ── 文件 sink：JSON 结构化，自动轮转 ──
     if log_file:
         log_path = Path(log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(str(log_path), encoding="utf-8")
-        file_handler.setFormatter(fmt)
-        logger.addHandler(file_handler)
+        logger.add(
+            str(log_path),
+            format="{time} {level} {message}",
+            serialize=True,          # JSON 格式
+            rotation="10 MB",        # 每 10MB 轮转
+            retention="30 days",     # 保留 30 天
+            compression="gz",        # 旧文件压缩
+            enqueue=True,            # 异步写入，不阻塞主线程
+            level=level.upper(),
+        )
 
-    return logger
-
-
-def get_logger(name: str = "smoke_detector") -> logging.Logger:
-    """获取已存在的 logger，不存在则返回 root logger。"""
-    return logging.getLogger(name)
+    # 绑定服务名到所有日志
+    return logger.bind(service=name)

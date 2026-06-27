@@ -6,11 +6,9 @@ RTSP 多线程流读取器
 
 import threading
 import time
-import logging
 
 import cv2
-
-logger = logging.getLogger("smoke_detector.streamer")
+from loguru import logger
 
 
 class RTSPStreamer:
@@ -57,13 +55,13 @@ class RTSPStreamer:
                 with self._lock:
                     self._frame = frame
                 self._connected = True
-                logger.info("RTSP 连接成功: %s", self.rtsp_url)
+                logger.info("RTSP 连接成功: {}", self.rtsp_url)
                 return True
             else:
-                logger.warning("RTSP 连接成功但首帧读取失败: %s", self.rtsp_url)
+                logger.warning("RTSP 连接成功但首帧读取失败: {}", self.rtsp_url)
                 return False
         except Exception as e:
-            logger.error("RTSP 连接异常 (%s): %s", self.rtsp_url, e)
+            logger.error("RTSP 连接异常 ({}): {}", self.rtsp_url, e)
             return False
 
     def _release(self):
@@ -85,7 +83,7 @@ class RTSPStreamer:
                     # 重连逻辑
                     if self.reconnect_enabled:
                         logger.info(
-                            "尝试重连 (%.1fs 后)...: %s", delay, self.rtsp_url
+                            "尝试重连 ({:.1f}s 后)...: {}", delay, self.rtsp_url
                         )
                         time.sleep(delay)
                         if self._connect():
@@ -105,17 +103,17 @@ class RTSPStreamer:
                         with self._lock:
                             self._frame = frame
                     else:
-                        logger.warning("RTSP 读取失败，断开: %s", self.rtsp_url)
+                        logger.warning("RTSP 读取失败，断开: {}", self.rtsp_url)
                         self._release()
                         delay = self.reconnect_delay
                 except Exception as e:
-                    logger.error("RTSP 读取异常: %s", e)
+                    logger.error("RTSP 读取异常: {}", e)
                     self._release()
                     delay = self.reconnect_delay
 
             except Exception:
                 logger.exception(
-                    "RTSP 线程未预期异常，1s 后尝试恢复: %s", self.rtsp_url
+                    "RTSP 线程未预期异常，1s 后尝试恢复: {}", self.rtsp_url
                 )
                 self._release()
                 delay = self.reconnect_delay
@@ -140,7 +138,7 @@ class RTSPStreamer:
         self._stopped = True
         self._thread.join(timeout=5)
         self._release()
-        logger.info("RTSP 流已停止: %s", self.rtsp_url)
+        logger.info("RTSP 流已停止: {}", self.rtsp_url)
 
 
 class LocalStreamer:
@@ -172,13 +170,13 @@ class LocalStreamer:
                 with self._lock:
                     self._frame = frame
                 self._connected = True
-                logger.info("本地摄像头已连接: device_id=%d", self.device_id)
+                logger.info("本地摄像头已连接: device_id={}", self.device_id)
                 return True
             else:
-                logger.warning("本地摄像头打开成功但首帧读取失败: device_id=%d", self.device_id)
+                logger.warning("本地摄像头打开成功但首帧读取失败: device_id={}", self.device_id)
                 return False
         except Exception as e:
-            logger.error("本地摄像头连接异常 (device_id=%d): %s", self.device_id, e)
+            logger.error("本地摄像头连接异常 (device_id={}): {}", self.device_id, e)
             return False
 
     def _release(self):
@@ -202,15 +200,15 @@ class LocalStreamer:
                         with self._lock:
                             self._frame = frame
                     else:
-                        logger.warning("本地摄像头读取失败: device_id=%d", self.device_id)
+                        logger.warning("本地摄像头读取失败: device_id={}", self.device_id)
                         self._release()
                 except Exception as e:
-                    logger.error("本地摄像头读取异常: %s", e)
+                    logger.error("本地摄像头读取异常: {}", e)
                     self._release()
 
             except Exception:
                 logger.exception(
-                    "本地摄像头线程未预期异常，1s 后尝试恢复: device_id=%d", self.device_id
+                    "本地摄像头线程未预期异常，1s 后尝试恢复: device_id={}", self.device_id
                 )
                 self._release()
                 time.sleep(1)
@@ -231,4 +229,4 @@ class LocalStreamer:
         self._stopped = True
         self._thread.join(timeout=5)
         self._release()
-        logger.info("本地摄像头已停止: device_id=%d", self.device_id)
+        logger.info("本地摄像头已停止: device_id={}", self.device_id)

@@ -5,11 +5,10 @@ Webhook 告警推送
 """
 
 import json
-import logging
 import urllib.request
 import urllib.error
 
-logger = logging.getLogger("smoke_detector.webhook")
+from loguru import logger
 
 
 class WebhookAlerter:
@@ -49,25 +48,25 @@ class WebhookAlerter:
                 with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                     status = resp.status
                     if 200 <= status < 300:
-                        logger.info("Webhook 发送成功 (status=%d): %s", status, self.url)
+                        logger.info("Webhook 发送成功 (status={}): {}", status, self.url)
                         return True
                     else:
                         logger.warning(
-                            "Webhook 返回非 2xx (attempt=%d/%d, status=%d)",
+                            "Webhook 返回非 2xx (attempt={}/{}, status={})",
                             attempt + 1, self.retries + 1, status,
                         )
             except urllib.error.HTTPError as e:
                 logger.warning(
-                    "Webhook HTTP 错误 (attempt=%d/%d, status=%d): %s",
+                    "Webhook HTTP 错误 (attempt={}/{}, status={}): {}",
                     attempt + 1, self.retries + 1, e.code, e.reason,
                 )
             except urllib.error.URLError as e:
                 logger.warning(
-                    "Webhook 连接错误 (attempt=%d/%d): %s",
+                    "Webhook 连接错误 (attempt={}/{}): {}",
                     attempt + 1, self.retries + 1, e.reason,
                 )
             except Exception as e:
-                logger.error("Webhook 未知错误 (attempt=%d/%d): %s", attempt + 1, self.retries + 1, e)
+                logger.error("Webhook 未知错误 (attempt={}/{}): {}", attempt + 1, self.retries + 1, e)
 
-        logger.error("Webhook 发送失败（已达最大重试次数）: %s", self.url)
+        logger.error("Webhook 发送失败（已达最大重试次数）: {}", self.url)
         return False

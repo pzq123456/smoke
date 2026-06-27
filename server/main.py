@@ -15,12 +15,12 @@
 """
 
 import argparse
-import logging
 import sys
 import time
 from pathlib import Path
 
 import yaml
+from loguru import logger
 
 # ---------------------------------------------------------------------------
 # 确保项目根目录在 sys.path 中（支持 python -m server.main 和 python server/main.py）
@@ -35,8 +35,6 @@ from server.core.streamer import RTSPStreamer, LocalStreamer
 from server.core.camera_worker import CameraWorker
 from server.alert.webhook import WebhookAlerter
 from server.alert.manager import AlertManager
-
-logger: logging.Logger | None = None  # 在 main() 中初始化
 
 
 # ============================================================================
@@ -107,8 +105,6 @@ def _create_streamer(cam: dict):
 # 主入口
 # ============================================================================
 def main():
-    global logger
-
     parser = argparse.ArgumentParser(description="抽烟检测服务端")
     parser.add_argument(
         "--config", "-c",
@@ -126,7 +122,7 @@ def main():
     logger = setup_logger(
         name="smoke_detector",
         level=log_cfg.get("level", "INFO"),
-        log_file=log_cfg.get("file"),
+        log_file=log_cfg.get("file", "logs/server.log"),
     )
     logger.info("=" * 60)
     logger.info("抽烟检测服务端 启动中...")
@@ -148,25 +144,27 @@ def main():
             timeout=webhook_cfg.get("timeout", 10),
             retries=webhook_cfg.get("retries", 2),
         )
-        logger.info("Webhook 已配置: %s", webhook_cfg["url"])
+        logger.info("Webhook 已配置: {}", webhook_cfg["url"])
     else:
-        logger.warning("未配置 Webhook URL，告警将只保存帧不推送")
+        logger.warning("未配置 Webhook URL，告警将不会推送")
 
     # 5. 启动摄像头 Workers
     alert_cfg = config.get("alert", {})
+    target_classes = config["model"].get("target_classes", ["smoking"])
     workers: list[CameraWorker] = []
 
     for cam in config["cameras"]:
         if not cam.get("enabled", True):
-            logger.info("[%s] 已禁用，跳过", cam.get("name", cam["id"]))
+            logger.info("[{}] 已禁用，跳过", cam.get("name", cam["id"]))
             continue
 
         alert_mgr = AlertManager(
             camera_id=cam["id"],
             camera_name=cam["name"],
+            target_classes=target_classes,
+            save_frame_overlay=alert_cfg.get("save_frame_overlay", False),
             cooldown_seconds=alert_cfg.get("cooldown_seconds", 30),
             min_detection_count=alert_cfg.get("min_detection_count", 3),
-            save_dir=_PROJECT_ROOT / alert_cfg.get("save_dir", "alerts"),
             webhook=webhook,
         )
 
@@ -186,7 +184,7 @@ def main():
         logger.error("没有启用的摄像头，退出")
         return
 
-    logger.info("已启动 %d 路摄像头，运行中... (Ctrl+C 停止)", len(workers))
+    logger.info("已启动 {} 路摄像头，运行中... (Ctrl+C 停止)", len(workers))
 
     # 6. 等待退出信号 + Worker 健康监控
     #    不使用 signal 模块（Windows 下与 GPU 线程交互时有不可靠问题），
@@ -203,7 +201,7 @@ def main():
                 for w in workers:
                     if not w.is_running:
                         logger.error(
-                            "[%s] Worker 线程已意外退出！请检查日志", w.camera_name
+                            "[{}] Worker 线程已意外退出！请检查日志", w.camera_name
                         )
                 t_last_health = now
 

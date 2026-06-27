@@ -1,29 +1,39 @@
 # 抽烟检测服务端
 
-基于 YOLO 的抽烟行为实时检测后台服务。支持多路 RTSP / 本地摄像头接入，检测到抽烟后通过 Webhook 推送告警并保存关键帧证据。
+基于 YOLO 的抽烟行为实时检测后台服务。支持多路 RTSP / 本地摄像头接入，检测到目标后标注帧并通过 Webhook 推送告警（含 base64 证据图片）。
 
 ## 目录结构
 
 ```
-server/
-├── main.py                 # 入口
-├── config.yaml             # 配置文件（修改此处即可，无需改代码）
-├── core/
-│   ├── streamer.py         # 视频流读取器（RTSP + 本地摄像头）
-│   ├── detector.py         # YOLO 模型封装
-│   └── camera_worker.py    # 单路摄像头 Worker 线程
-├── alert/
-│   ├── webhook.py          # Webhook HTTP POST 推送
-│   └── manager.py          # 告警管理（冷却 + 连续帧确认 + 关键帧保存）
-├── utils/
-│   └── logger.py           # 结构化日志
-└── README.md
+smoke/
+├── server/
+│   ├── main.py                 # 入口
+│   ├── config.yaml             # 配置文件（修改此处即可，无需改代码）
+│   ├── core/
+│   │   ├── streamer.py         # 视频流读取器（RTSP + 本地摄像头）
+│   │   ├── detector.py         # YOLO 模型封装
+│   │   └── camera_worker.py    # 单路摄像头 Worker 线程
+│   ├── alert/
+│   │   ├── webhook.py          # Webhook HTTP POST 推送
+│   │   └── manager.py          # 告警管理（冷却 + 连续帧确认 + 帧标注编码）
+│   ├── utils/
+│   │   └── logger.py           # loguru 日志配置
+│   └── README.md
+├── local/
+│   └── webhook_receiver.py     # Webhook 接收器（模拟第三方消费端）
+└── pyproject.toml
 ```
 
 ## 快速开始
 
 ```bash
-# 使用默认配置启动
+# 安装依赖（uv）
+uv sync
+
+# 终端 1：启动 Webhook 接收器（模拟消费端，保存证据帧 + 记录数据）
+python local/webhook_receiver.py
+
+# 终端 2：启动检测服务
 python -m server.main
 
 # 指定配置文件
@@ -39,6 +49,11 @@ python -m server.main --config my_config.yaml
 | `path` | string | **必填** | YOLO 模型权重路径，相对于项目根目录 |
 | `conf` | float | `0.35` | 置信度阈值，低于此值的检测结果被丢弃 |
 | `device` | int/string/null | `0` | GPU 设备 ID；`0`=第一块GPU；`null`或`"cpu"`=CPU推理 |
+| `target_classes` | list | `["smoking"]` | 触发告警的目标类别名，必须与模型类别名一致 |
+
+`target_classes` 示例：
+- 单类模型 `nc:1, names:['cigarette']` → `target_classes: ['cigarette']`
+- 多类模型 `nc:2, names:['face','smoking']` → `target_classes: ['smoking']`
 
 ### cameras — 摄像头列表
 
@@ -46,7 +61,7 @@ python -m server.main --config my_config.yaml
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `id` | string | **必填** | 唯一标识，用于告警 payload 和帧保存目录 |
+| `id` | string | **必填** | 唯一标识，用于告警 payload |
 | `name` | string | **必填** | 显示名称，用于日志和告警 |
 | `type` | string | `"rtsp"` | 摄像头类型：`rtsp`（RTSP网络流）或 `local`（本地USB/内置摄像头） |
 | `enabled` | bool | `true` | 是否启用该摄像头 |
@@ -87,14 +102,14 @@ cameras:
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `cooldown_seconds` | float | `30` | 同一摄像头两次告警的最小间隔（秒）。防止同一根烟产生几十条告警 |
-| `min_detection_count` | int | `3` | 连续检测到抽烟的帧数阈值。只有连续 N 帧都检测到抽烟才触发告警，防止单帧误报 |
-| `save_dir` | string | `"alerts"` | 关键帧保存根目录，相对于项目根目录。帧保存为 `{save_dir}/{camera_id}/YYYYMMDD_HHMMSS.jpg` |
+| `min_detection_count` | int | `3` | 连续检测到目标的帧数阈值。只有连续 N 帧都检测到才触发告警，防止单帧误报 |
+| `save_frame_overlay` | bool | `false` | 是否在证据帧上叠加摄像头名称/时间水印。摄像头流已自带则无需开启 |
 
 #### alert.webhook — Webhook 推送
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `url` | string | `null` | Webhook 接收地址。为 null 时不推送，只保存帧 |
+| `url` | string | `null` | Webhook 接收地址。为 null 时不推送 |
 | `timeout` | float | `10` | 单次请求超时（秒） |
 | `retries` | int | `2` | 失败后重试次数（不含首次） |
 
@@ -103,12 +118,17 @@ cameras:
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `level` | string | `"INFO"` | 日志级别：`DEBUG`/`INFO`/`WARNING`/`ERROR` |
-| `file` | string/null | `null` | 日志文件路径。null 表示只输出到控制台 |
+| `file` | string | `"logs/server.log"` | 日志文件路径（JSON 格式，自动轮转 10MB，保留 30 天，旧文件 gz 压缩） |
+
+日志由 **loguru** 管理，支持：
+- 控制台彩色输出（开发友好）
+- 文件 JSON 结构化记录（方便检索分析）
+- 自动轮转 + 压缩 + 过期清理
 
 ## 告警流程
 
 ```
-读取帧 → 模型推理 → 检测到抽烟？
+读取帧 → 模型推理 → 检测到目标类别？
                          ↓ 是
                    连续帧计数器 +1
                          ↓
@@ -117,30 +137,37 @@ cameras:
                    冷却期已过？
                          ↓ 是
                    🚨 触发告警
-                   ├── 标注帧 + 时间戳 → 保存 JPG
+                   ├── 标注帧（bbox + 可选水印）
+                   ├── JPEG 编码 → base64
                    └── 构建 payload → Webhook POST
+                                        ↓
+                              接收端消费
+                              ├── 解码 base64 → 写入磁盘
+                              └── 结构化记录推送数据
 ```
 
 **关键设计：**
-- **连续帧确认**：只有连续 `min_detection_count` 帧（默认 3 帧）都检测到抽烟才触发，杜绝单帧噪点误报
+- **连续帧确认**：只有连续 `min_detection_count` 帧（默认 3 帧）都检测到才触发，杜绝单帧噪点误报
 - **冷却期**：同一摄像头 `cooldown_seconds` 秒内（默认 30 秒）只告警一次，避免告警风暴
-- **计数器递减**：没有检测到抽烟时，连续计数器逐步递减（而非直接清零），容忍偶尔丢帧
+- **计数器递减**：没有检测到目标时，连续计数器逐步递减（而非直接清零），容忍偶尔丢帧
+- **base64 证据帧**：标注后的 JPEG 直接编码进 payload，接收端无需访问检测端文件系统
+- **检测端不写磁盘**：帧保存由消费端负责，检测端只推送
 
 ## Webhook Payload 格式
 
 ```json
 {
   "camera_id": "gate",
-  "camera_name": "工厂大门",
-  "timestamp": "2026-06-26T17:30:00",
+  "camera_name": "测试",
+  "timestamp": "2026-06-27T09:30:00+00:00",
   "detections": [
     {
-      "class": "smoking",
+      "class": "cigarette",
       "confidence": 0.89,
       "bbox": [320, 240, 400, 380]
     }
   ],
-  "frame_path": "alerts/gate/20260626_173000.jpg"
+  "frame_base64": "/9j/4AAQSkZJRgABAQ..."
 }
 ```
 
@@ -148,10 +175,10 @@ cameras:
 
 ### Webhook 接收器
 
-`local/webhook_receiver.py` 是一个零依赖的 HTTP 测试服务器，用于接收和验证告警推送：
+`local/webhook_receiver.py` 模拟第三方消费端：
 
 ```bash
-# 终端1：启动接收器
+# 终端1：启动接收器（默认 0.0.0.0:9999，帧保存到 alerts/）
 python local/webhook_receiver.py
 
 # 终端2：启动检测服务（config.yaml 中 webhook.url 设为 http://localhost:9999/api/smoke-alert）
@@ -159,8 +186,22 @@ python -m server.main
 ```
 
 参数：
-- `--port` / `-p`：监听端口（默认 9999）
-- `--save` / `-s`：保存收到的告警到 JSON 文件
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--host` | `0.0.0.0` | 监听地址 |
+| `--port` / `-p` | `9999` | 监听端口 |
+| `--save-dir` | `alerts` | 证据帧保存目录 |
+
+接收端文件输出结构：
+
+```
+alerts/
+├── payload.jsonl              # 结构化 payload 日志（JSON 格式，50MB 轮转，保留 30 天）
+└── gate/
+    ├── 20260627_093000.jpg    # 解码后的证据帧
+    └── 20260627_093045.jpg
+```
 
 ### 本地摄像头测试
 
@@ -170,8 +211,8 @@ python -m server.main
 
 | 级别 | 内容 | 频率 |
 |------|------|------|
-| INFO | 启动/停止、告警触发、关键帧保存、每 60 秒运行摘要 | 低频 |
-| DEBUG | 每 100 帧的详细统计（FPS、推理延迟）、抽烟检测命中 | 高频 |
+| INFO | 启动/停止、告警触发、Webhook 推送、每 60 秒运行摘要 | 低频 |
+| DEBUG | 每 100 帧的详细统计（FPS、推理延迟）、检测命中 | 高频 |
 | WARNING | RTSP 断线重连、帧读取失败 | 按需 |
 | ERROR | 检测异常、Webhook 推送失败、Worker 意外退出 | 按需 |
 

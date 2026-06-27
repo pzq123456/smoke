@@ -4,9 +4,8 @@ from pathlib import Path
 
 def main():
     # 1. 加载YOLO模型
-    script_dir = Path(__file__).parent
-    # model_path = script_dir / "runs" / "detect" / "yolo26s_smoking_20260625_0033" / "weights" / "best.pt"
-    model_path = script_dir / "best.pt"
+    script_dir = Path(__file__).parent.parent
+    model_path = script_dir / "runs" / "detect" / "yolo26m_smoking_20260626_0601" / "weights" / "best.pt"
 
     
     if not model_path.exists():
