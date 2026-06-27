@@ -26,7 +26,7 @@ WORKDIR /app
 
 # -- Python 依赖 ---------------------------------------------------------------
 # torch / torchvision 已包含在基础镜像中，这里只装额外依赖
-RUN pip install --no-cache-dir \
+RUN pip install --no-cache-dir --break-system-packages \
     loguru \
     opencv-python \
     ultralytics \

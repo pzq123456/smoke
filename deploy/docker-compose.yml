@@ -18,7 +18,7 @@ services:
   detector:
     build:
       context: ..                    # 项目根目录
-      dockerfile: ../Dockerfile
+      dockerfile: Dockerfile
     image: smoke-detector:latest
     container_name: smoke-detector
     runtime: nvidia

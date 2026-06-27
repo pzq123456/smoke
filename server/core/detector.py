@@ -62,7 +62,6 @@ class SmokeDetector:
             frame,
             conf=self._conf,
             verbose=False,
-            half=(self._device != "cpu"),
             device=self._device,
         )
 
