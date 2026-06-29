@@ -24,8 +24,8 @@ services:
     runtime: nvidia
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
-    extra_hosts:
-      - "host.docker.internal:host-gateway"   # 让容器能访问宿主机（webhook 测试用）
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"   # 让容器能访问宿主机（webhook 测试用）
     volumes:
       # -- 配置（只读） --
       - ./config.yaml:/app/server/config.yaml:ro

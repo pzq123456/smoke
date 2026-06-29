@@ -23,11 +23,10 @@ model:
 # type=rtsp 时填写 rtsp_url，容器内 RTSPStreamer（底层 cv2.VideoCapture）
 # 同时支持 HTTP MJPEG 流——测试时配合 local/camera_stream.py 使用
 cameras:
-  - id: "test"
-    name: "本地测试"
+  - id: "720"
+    name: "dahua720"
     type: "rtsp"
-    rtsp_url: "http://host.docker.internal:8080/stream"             # 本地测试：MJPEG 推流
-    # rtsp_url: "rtsp://192.168.1.100:554/stream"                   # 生产环境：RTSP 摄像头
+    rtsp_url: "rtsp://118.140.234.166:8554/dahua1001722"
     enabled: true
 
 # -----------------------------------------------------------------------------
@@ -39,7 +38,7 @@ alert:
   save_frame_overlay: false       # 是否在证据帧上叠加水印
 
   webhook:
-    url: "http://host.docker.internal:9999/api/smoke-alert"  # 宿主机 webhook 接收器
+    url: "http://192.168.1.37:6071/ECHO/api/v1/webhook/smoking-alarm"  # 宿主机 webhook 接收器
     timeout: 10                                               # 请求超时（秒）
     retries: 2                                                # 失败重试次数
 

@@ -335,3 +335,7 @@ error: externally-managed-environment
 - **未命中时计数器递减**（非直接清零），容忍偶尔丢帧
 - **计数器达到阈值后**：触发告警，计数器归零，更新冷却时间戳
 - **冷却期内再命中**：计数器归零但不触发，避免冷却结束后立即再次告警
+
+curl -i http://192.168.1.37:6071/ECHO/api/v1/webhook/smoking-alarm
+# 简单测试RTSP端口
+curl -i rtsp://118.140.234.166:8554/dahua1001722 2>&1 | head -10

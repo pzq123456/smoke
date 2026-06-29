@@ -35,11 +35,11 @@ def main():
     script_dir = Path(__file__).parent
     
     # 模型路径：runs\detect\yolo26s_smoking_20260625_0033\weights\best.pt
-    model_path = script_dir / "runs" / "detect" / "yolo26s_smoking_20260625_0033" / "weights" / "best.pt"
+    model_path = script_dir / "runs" / "detect" / "yolo26m_smoking_20260626_0601" / "weights" / "best.pt"
 
     
     # RTSP 视频地址（复用之前的地址）
-    rtsp_url = "rtsp://118.140.130.26:8554/dahua1003362"
+    rtsp_url = "rtsp://118.140.234.166:8554/dahua1001722"
     
     # 检查模型文件是否存在
     if not model_path.exists():
