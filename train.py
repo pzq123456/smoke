@@ -7,22 +7,21 @@ def main():
     SETTINGS["tensorboard"] = True
     
     current_time = datetime.now().strftime("%Y%m%d_%H%M")
-    run_name = f"yolo26m_smoking_{current_time}"
+    run_name = f"yolo26s_smoking_{current_time}"
     
-    model = YOLO("yolo26m.pt")
+    model = YOLO("yolo26s.pt")
 
     model.train(
         data="smoking4/data.yaml",
         epochs=300,
         patience=50,
         imgsz=640,
-        batch=64,
+        batch=128,
         device=-1,
         name=run_name,
         workers=8,
 
-        mixup=0.0,
-        mosaic=0.5,
+        copy_paste=0.5 # 粘贴小对象
     )
 
 if __name__ == "__main__":
