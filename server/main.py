@@ -162,6 +162,7 @@ def main():
             camera_id=cam["id"],
             camera_name=cam["name"],
             target_classes=target_classes,
+            require_all_targets=alert_cfg.get("require_all_targets"),
             save_frame_overlay=alert_cfg.get("save_frame_overlay", False),
             cooldown_seconds=alert_cfg.get("cooldown_seconds", 30),
             min_detection_count=alert_cfg.get("min_detection_count", 3),
