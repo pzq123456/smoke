@@ -25,22 +25,31 @@ class SmokeDetector:
     def __init__(
         self,
         model_path: str | Path,
-        conf: float = 0.35,
+        conf: float | dict[str, float] = 0.35,
         device: int | str | None = 0,
     ):
         """
         Args:
             model_path: YOLO 模型权重路径
-            conf: 置信度阈值
+            conf: 置信度阈值。float 时全局统一；dict 时逐类设定（如 {'face': 0.5, 'smoking': 0.25}）。
+                  YOLO 内部使用 min(dict.values()) 保证不漏检，后置逐类提纯。
             device: GPU 设备 ID（0, 1, ...），None 或 "cpu" 表示 CPU
         """
         model_path = Path(model_path)
         if not model_path.exists():
             raise FileNotFoundError(f"模型文件不存在: {model_path}")
 
-        logger.info("加载模型: {} (device={}, conf={:.2f})", model_path, device, conf)
+        # 多态 conf：dict 时取最低值给 YOLO 保召回，逐类过滤在 detect() 中完成
+        if isinstance(conf, dict):
+            self._class_conf = conf
+            self._conf = min(conf.values())
+        else:
+            self._class_conf = None
+            self._conf = conf
+
+        logger.info("加载模型: {} (device={}, conf={})", model_path, device,
+                    conf if self._class_conf is None else f"{self._conf}(yolo) / {self._class_conf}(per-class)")
         self._model = YOLO(str(model_path), task="detect")
-        self._conf = conf
 
         # 解析 device 参数
         if device is None or device == "cpu":
@@ -74,6 +83,13 @@ class SmokeDetector:
             cls_id = int(box.cls[0])
             class_name = self._model.names.get(cls_id, str(cls_id))
             confidence = float(box.conf[0])
+
+            # 逐类置信度后置过滤
+            if self._class_conf is not None:
+                min_conf = self._class_conf.get(class_name, self._conf)
+                if confidence < min_conf:
+                    continue
+
             x1, y1, x2, y2 = box.xyxy[0].tolist()
             detections.append(
                 Detection(

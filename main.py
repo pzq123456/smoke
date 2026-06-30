@@ -5,9 +5,13 @@ from pathlib import Path
 import time
 
 class RTSPStreamer:
-    """多线程 RTSP 读取类，确保永远获取最新的一帧"""
+    """多线程视频流读取类，确保永远获取最新的一帧"""
     def __init__(self, rtsp_url):
-        self.cap = cv2.VideoCapture(rtsp_url)
+        # ------------------ 【修改 1/2】 ------------------
+        # 如果是纯数字字符串（如 "0"），转换成 int 以支持本地摄像头；否则保持字符串用于远程流
+        source = int(rtsp_url) if str(rtsp_url).isdigit() else rtsp_url
+        
+        self.cap = cv2.VideoCapture(source)
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         self.ret, self.frame = self.cap.read()
         self.stopped = False
@@ -35,11 +39,15 @@ def main():
     script_dir = Path(__file__).parent
     
     # 模型路径：runs\detect\yolo26s_smoking_20260625_0033\weights\best.pt
-    model_path = script_dir / "runs" / "detect" / "yolo26m_smoking_20260626_0601" / "weights" / "best.pt"
+    model_path = script_dir / "runs" / "detect" / "yolo26s_smoking_20260630_0404" / "weights" / "best.pt"
 
-    
-    # RTSP 视频地址（复用之前的地址）
+    # ------------------ 【修改 2/2】 ------------------
+    # 【方案 A】使用远程 RTSP 流
     rtsp_url = "rtsp://118.140.234.166:8554/dahua1001722"
+    
+    # 【方案 B】使用本地摄像头（取消注释下一行即可切换）
+    # rtsp_url = "0" 
+    # --------------------------------------------------
     
     # 检查模型文件是否存在
     if not model_path.exists():
@@ -50,8 +58,8 @@ def main():
     print(f"加载模型: {model_path}")
     model = YOLO(str(model_path), task="detect")
     
-    # 使用多线程读取 RTSP 流
-    print(f"连接 RTSP: {rtsp_url}")
+    # 使用多线程读取视频流
+    print(f"连接视频源: {rtsp_url}")
     streamer = RTSPStreamer(rtsp_url)
     time.sleep(1)  # 等待启动
     
