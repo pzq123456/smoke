@@ -8,12 +8,13 @@
 # 模型参数
 # -----------------------------------------------------------------------------
 model:
-  path: "runs/detect/yolo26s_smoking_20260625_0033/weights/best.pt"   # YOLO 权重路径（相对于项目根目录）
-  conf:                                                               # 置信度阈值：float=全局统一，dict=逐类设定
-    face: 0.5
-    smoking: 0.25
+  path: "runs/detect/yolo26m_smoking_20260626_0601/weights/best.pt"   # 抽烟模型权重路径（第二阶段，相对于项目根目录）
+  person_model:                                                       # 可选：人体检测模型（第一阶段），不配置则回退为单阶段模式
+    path: "yolo26n.pt"                                                # COCO 预训练模型，class 0 = person
+    conf: 0.4                                                         # 人体检测置信度阈值
+  conf: 0.35                                                           # 抽烟检测置信度阈值
   device: 0                                                            # GPU 设备 ID，null 或 "cpu" 表示 CPU
-  target_classes: ['face', 'smoking']                                 # 触发告警的目标类别（必须与模型类别名一致）
+  target_classes: ['cigarette']                                         # 触发告警的目标类别（必须与模型类别名一致）
 
 # -----------------------------------------------------------------------------
 # 摄像头列表

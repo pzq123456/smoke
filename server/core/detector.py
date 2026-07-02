@@ -20,20 +20,30 @@ class Detection:
 
 
 class SmokeDetector:
-    """抽烟检测器，封装 YOLO 模型的加载与推理。"""
+    """抽烟检测器，封装 YOLO 模型的加载与推理。
+
+    支持两种模式：
+    - 单阶段（默认）：直接在全帧上检测抽烟目标
+    - 两阶段（配置 person_model 时启用）：先检测人体，再在人体 ROI 内检测抽烟，显著降低误报
+    """
 
     def __init__(
         self,
         model_path: str | Path,
         conf: float | dict[str, float] = 0.35,
         device: int | str | None = 0,
+        person_model_path: str | Path | None = None,
+        person_conf: float = 0.4,
     ):
         """
         Args:
-            model_path: YOLO 模型权重路径
+            model_path: YOLO 抽烟模型权重路径
             conf: 置信度阈值。float 时全局统一；dict 时逐类设定（如 {'face': 0.5, 'smoking': 0.25}）。
                   YOLO 内部使用 min(dict.values()) 保证不漏检，后置逐类提纯。
             device: GPU 设备 ID（0, 1, ...），None 或 "cpu" 表示 CPU
+            person_model_path: 可选的人体检测模型路径（COCO 预训练，class 0=person）。
+                               配置后启用两阶段检测：先找人 → 再在人体 ROI 内检测抽烟。
+            person_conf: 人体检测置信度阈值（默认 0.4）
         """
         model_path = Path(model_path)
         if not model_path.exists():
@@ -47,7 +57,7 @@ class SmokeDetector:
             self._class_conf = None
             self._conf = conf
 
-        logger.info("加载模型: {} (device={}, conf={})", model_path, device,
+        logger.info("加载抽烟模型: {} (device={}, conf={})", model_path, device,
                     conf if self._class_conf is None else f"{self._conf}(yolo) / {self._class_conf}(per-class)")
         self._model = YOLO(str(model_path), task="detect")
 
@@ -57,9 +67,24 @@ class SmokeDetector:
         else:
             self._device = device
 
+        # --- 可选：人体检测模型（第一阶段） ---
+        self._person_model = None
+        self._person_conf = person_conf
+        if person_model_path is not None:
+            person_model_path = Path(person_model_path)
+            if not person_model_path.exists():
+                raise FileNotFoundError(f"人体检测模型不存在: {person_model_path}")
+            logger.info("加载人体检测模型: {} (conf={})", person_model_path, person_conf)
+            self._person_model = YOLO(str(person_model_path), task="detect")
+
     def detect(self, frame) -> list[Detection]:
         """
         对单帧执行抽烟检测。
+
+        若配置了人体检测模型则走两阶段管线：
+        1. 检测人体（COCO class 0）
+        2. 在每个人体 ROI 内检测抽烟目标
+        未配置人体模型时走单阶段全帧检测。
 
         Args:
             frame: BGR numpy 数组（来自 cv2）
@@ -67,6 +92,10 @@ class SmokeDetector:
         Returns:
             Detection 列表，未检测到任何目标时为空列表
         """
+        if self._person_model is not None:
+            return self._detect_two_stage(frame)
+
+        # --- 单阶段模式：全帧检测 ---
         results = self._model.predict(
             frame,
             conf=self._conf,
@@ -101,26 +130,96 @@ class SmokeDetector:
 
         return detections
 
-    def annotate_frame(self, frame, detections: list[Detection]):
+    # ------------------------------------------------------------------
+    # 两阶段检测（人体 → ROI → 抽烟）
+    # ------------------------------------------------------------------
+    def _detect_two_stage(self, frame) -> list[Detection]:
         """
-        在帧上绘制检测框和标签（不修改原图，返回新图）。
-
-        Args:
-            frame: 原始帧
-            detections: detect() 返回的检测列表
+        两阶段检测管线：
+        1. 人体检测：用 COCO 预训练模型检测 frame 中所有人（class 0）
+        2. ROI 抽烟检测：裁剪每个人体区域，用抽烟模型在该 ROI 内检测
+        3. 坐标映射：将 ROI 内坐标映射回全帧坐标
 
         Returns:
-            标注后的帧
+            Detection 列表（class_name 为模型类别名，bbox 为全帧坐标）
         """
-        import cv2
+        h, w = frame.shape[:2]
+        detections: list[Detection] = []
 
-        annotated = frame.copy()
-        for d in detections:
-            x1, y1, x2, y2 = d.bbox
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 0, 255), 2)
-            label = f"{d.class_name} {d.confidence:.2f}"
-            cv2.putText(
-                annotated, label, (x1, max(y1 - 8, 0)),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2,
-            )
-        return annotated
+        # --- 第一阶段：人体检测 ---
+        person_results = self._person_model.predict(
+            frame,
+            conf=self._person_conf,
+            classes=[0],          # COCO class 0 = person
+            verbose=False,
+            device=self._device,
+        )
+
+        if not person_results or person_results[0].boxes is None:
+            return detections
+
+        boxes_data = person_results[0].boxes.data.cpu().numpy()
+        if len(boxes_data) == 0:
+            return detections
+
+        # --- 第二阶段：逐人体 ROI 检测抽烟 ---
+        for box in boxes_data:
+            x1, y1, x2, y2 = map(int, box[:4])
+            x1, y1 = max(0, x1), max(0, y1)
+            x2, y2 = min(w, x2), min(h, y2)
+
+            # 跳过过小的 ROI（避免无效推理）
+            if (x2 - x1) < 30 or (y2 - y1) < 30:
+                continue
+
+            person_roi = frame[y1:y2, x1:x2]
+            if person_roi.size == 0:
+                continue
+
+            # 对 ROI 执行抽烟检测
+            try:
+                smoke_results = self._model.predict(
+                    person_roi,
+                    conf=self._conf,
+                    verbose=False,
+                    device=self._device,
+                )
+            except Exception as e:
+                logger.warning(
+                    "人体 ROI [{},{} -> {},{}] 抽烟检测异常: {}",
+                    x1, y1, x2, y2, e,
+                )
+                continue
+
+            if not smoke_results or smoke_results[0].boxes is None:
+                continue
+
+            # 收集该 ROI 内所有有效抽烟检测，取最高置信度
+            best_conf = 0.0
+            best_class = None
+            for smoke_box in smoke_results[0].boxes:
+                cls_id = int(smoke_box.cls[0])
+                class_name = self._model.names.get(cls_id, str(cls_id))
+                confidence = float(smoke_box.conf[0])
+
+                # 逐类置信度后置过滤（与单阶段逻辑一致）
+                if self._class_conf is not None:
+                    min_conf = self._class_conf.get(class_name, self._conf)
+                    if confidence < min_conf:
+                        continue
+
+                if confidence > best_conf:
+                    best_conf = confidence
+                    best_class = class_name
+
+            # 若该人体区域检测到抽烟，以人体框作为输出（与 main.py 行为一致：
+            # 告警帧标注整个人体而非仅烟蒂，提供更清晰的上下文）
+            if best_class is not None:
+                detections.append(Detection(
+                    class_name=best_class,
+                    confidence=best_conf,
+                    bbox=(x1, y1, x2, y2),
+                ))
+
+        return detections
+

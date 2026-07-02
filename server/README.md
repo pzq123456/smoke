@@ -1,6 +1,6 @@
 # 抽烟检测服务端
 
-基于 YOLO 的抽烟行为实时检测后台服务。支持多路 RTSP / 本地摄像头接入，检测到目标后标注帧并通过 Webhook 推送告警（含 base64 证据图片）。
+基于 YOLO 的两阶段抽烟行为实时检测后台服务。先检测人体（COCO 预训练模型），再在人体区域内判定是否抽烟，大幅降低误报。支持单阶段回退模式、多路 RTSP / 本地摄像头接入，检测到目标后标注帧并通过 Webhook 推送告警（含 base64 证据图片）。
 
 ## 目录结构
 
@@ -11,7 +11,7 @@ smoke/
 │   ├── config.yaml             # 配置文件（修改此处即可，无需改代码）
 │   ├── core/
 │   │   ├── streamer.py         # 视频流读取器（RTSP + 本地摄像头）
-│   │   ├── detector.py         # YOLO 模型封装
+│   │   ├── detector.py         # YOLO 模型封装（支持单阶段 / 两阶段切换）
 │   │   └── camera_worker.py    # 单路摄像头 Worker 线程
 │   ├── alert/
 │   │   ├── webhook.py          # Webhook HTTP POST 推送
@@ -46,14 +46,32 @@ python -m server.main --config my_config.yaml
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `path` | string | **必填** | YOLO 模型权重路径，相对于项目根目录 |
-| `conf` | float | `0.35` | 置信度阈值，低于此值的检测结果被丢弃 |
+| `path` | string | **必填** | 抽烟模型权重路径，相对于项目根目录（第二阶段） |
+| `person_model` | object | 可选 | **人体检测模型配置（第一阶段）**。不配置则回退为单阶段全帧检测模式 |
+| `person_model.path` | string | 必填 | 人体检测模型路径（COCO 预训练，class 0=person），如 `yolo26n.pt` |
+| `person_model.conf` | float | `0.4` | 人体检测置信度阈值 |
+| `conf` | float/dict | `0.35` | 抽烟检测置信度阈值。float 时全局统一；dict 时逐类设定（如 `{smoking: 0.35}`）。YOLO 内部使用最低值保证召回率，后置逐类提纯 |
 | `device` | int/string/null | `0` | GPU 设备 ID；`0`=第一块GPU；`null`或`"cpu"`=CPU推理 |
-| `target_classes` | list | `["smoking"]` | 触发告警的目标类别名，必须与模型类别名一致 |
+| `target_classes` | list | `["smoking"]` | 触发告警的目标类别名，必须与抽烟模型类别名一致。两阶段模式下仅需 `['smoking']` |
 
-`target_classes` 示例：
-- 单类模型 `nc:1, names:['cigarette']` → `target_classes: ['cigarette']`
-- 多类模型 `nc:2, names:['face','smoking']` → `target_classes: ['smoking']`
+**检测模式说明：**
+
+- **两阶段（推荐）**：配置 `person_model` 后启用。先检测人体 → 裁剪人体 ROI → 在 ROI 内检测抽烟。仅人体附近的烟蒂才会被识别，显著降低误报。
+- **单阶段（回退）**：不配置 `person_model`。直接在全帧上检测抽烟目标。适合已有低误报模型的场景，或需要检测无人场景中烟雾的场景。
+
+**完整配置示例：**
+
+```yaml
+model:
+  path: "runs/detect/yolo26s_smoking_20260625_0033/weights/best.pt"
+  person_model:                         # 可选：注释掉或删除此块即回退单阶段
+    path: "yolo26n.pt"
+    conf: 0.4
+  conf:
+    smoking: 0.35
+  device: 0
+  target_classes: ['smoking']
+```
 
 ### cameras — 摄像头列表
 
@@ -125,26 +143,30 @@ cameras:
 - 文件 JSON 结构化记录（方便检索分析）
 - 自动轮转 + 压缩 + 过期清理
 
-## 告警流程
+## 检测流程
 
 ```
-读取帧 → 模型推理 → 检测到目标类别？
-                         ↓ 是
-                   连续帧计数器 +1
-                         ↓
-                   达到 min_detection_count？
-                         ↓ 是
-                   冷却期已过？
-                         ↓ 是
-                   🚨 触发告警
-                   ├── 标注帧（bbox + 可选水印）
-                   ├── JPEG 编码 → base64
-                   └── 构建 payload → Webhook POST
-                                        ↓
-                              接收端消费
-                              ├── 解码 base64 → 写入磁盘
-                              └── 结构化记录推送数据
+读取帧 → [人体检测（COCO）] → [裁剪人体 ROI] → [抽烟检测（ROI 内）]
+                                                    ↓
+                                              检测到 smoking？
+                                                    ↓ 是
+                                              连续帧计数器 +1
+                                                    ↓
+                                              达到 min_detection_count？
+                                                    ↓ 是
+                                              冷却期已过？
+                                                    ↓ 是
+                                              🚨 触发告警
+                                              ├── 标注帧（bbox + 可选水印）
+                                              ├── JPEG 编码 → base64
+                                              └── 构建 payload → Webhook POST
+                                                                   ↓
+                                                         接收端消费
+                                                         ├── 解码 base64 → 写入磁盘
+                                                         └── 结构化记录推送数据
 ```
+
+> 注：未配置 `person_model` 时，跳过人体检测和 ROI 裁剪步骤，直接在全帧上执行抽烟检测。
 
 **关键设计：**
 - **连续帧确认**：只有连续 `min_detection_count` 帧（默认 3 帧）都检测到才触发，杜绝单帧噪点误报

@@ -12,12 +12,13 @@
 # 模型参数
 # -----------------------------------------------------------------------------
 model:
-  path: "/models/best.pt"                                          # ← 模型文件在容器内的路径
-  conf:                                                             # 置信度阈值：float=全局统一，dict=逐类设定
-    face: 0.5
-    smoking: 0.25
-  device: 0                                                        # GPU 设备 ID；"cpu" 表示 CPU
-  target_classes: ['face', 'smoking']                             # 触发告警的目标类别名（需同时存在）
+  path: "/models/best.pt"                                            # 抽烟模型在容器内的路径（第二阶段）
+  person_model:                                                      # 人体检测模型（第一阶段）
+    path: "/models/yolo26n.pt"                                       # COCO 预训练，class 0 = person
+    conf: 0.4
+  conf: 0.6                                                         # 抽烟检测置信度阈值
+  device: 0                                                          # GPU 设备 ID；"cpu" 表示 CPU
+  target_classes: ['cigarette']                                      # 触发告警的目标类别名
 
 # -----------------------------------------------------------------------------
 # 摄像头列表
@@ -36,11 +37,11 @@ cameras:
 # -----------------------------------------------------------------------------
 alert:
   cooldown_seconds: 10            # 同摄像头两次告警最小间隔（秒）
-  min_detection_count: 1          # 连续检测到目标的帧数阈值
+  min_detection_count: 3          # 连续检测到目标的帧数阈值
   save_frame_overlay: false       # 是否在证据帧上叠加水印
 
   webhook:
-    url: "http://192.168.1.37:6071/ECHO/api/v1/webhook/smoking-alarm"  # 宿主机 webhook 接收器
+    url: "http://192.168.1.24:6034/protal/smoking-alarm/webhook"  # 更新 宿主机 webhook 接收器
     timeout: 10                                               # 请求超时（秒）
     retries: 2                                                # 失败重试次数
 
