@@ -58,7 +58,7 @@ class CameraWorker:
             target=self._run, daemon=True, name=f"worker-{self.camera_id}"
         )
         self._thread.start()
-        logger.info("[{}] Worker 已启动", self.camera_name)
+        logger.debug("[{}] Worker 线程已启动", self.camera_name)
 
     def stop(self):
         """停止 Worker 线程并释放资源。"""
@@ -67,7 +67,7 @@ class CameraWorker:
             self._streamer.stop()
         if self._thread:
             self._thread.join(timeout=5)
-        logger.info("[{}] Worker 已停止", self.camera_name)
+        logger.debug("[{}] Worker 已停止", self.camera_name)
 
     @property
     def is_running(self) -> bool:
@@ -79,10 +79,11 @@ class CameraWorker:
     def _run(self):
         """Worker 主循环。"""
         frame_count = 0
+        alert_count = 0
         t_start = time.time()
         t_last_summary = t_start
 
-        logger.info("[{}] 开始检测", self.camera_name)
+        logger.debug("[{}] 开始检测", self.camera_name)
 
         while not self._stopped.is_set():
             try:
@@ -104,12 +105,12 @@ class CameraWorker:
                 t2 = time.time()
                 now = time.time()
 
-                # 3. 告警处理（防御：handle 内部异常不杀死 Worker）
-                if detections:
-                    try:
-                        self.alert_manager.handle(frame, detections)
-                    except Exception:
-                        logger.exception("[{}] 告警处理异常", self.camera_name)
+                # 3. 告警处理（防御：handle 内部异常不杀死 Worker；每帧调用以支持连续帧计数）
+                try:
+                    if self.alert_manager.handle(frame, detections):
+                        alert_count += 1
+                except Exception:
+                    logger.exception("[{}] 告警处理异常", self.camera_name)
 
                 # 4. 统计
                 frame_count += 1
@@ -124,14 +125,12 @@ class CameraWorker:
                         self.camera_name, frame_count, inference_ms, fps, elapsed,
                     )
 
-                # -- INFO: 时间摘要（默认每 60 秒一条） --
+                # -- DEBUG: 时间摘要（默认每 60 秒一条） --
                 if now - t_last_summary >= self.summary_interval:
                     elapsed = now - t_start
                     fps = frame_count / elapsed if elapsed > 0 else 0
-                    logger.info(
-                        "[{}] 运行 {}s | 已处理 {} 帧 | FPS {:.1f}",
-                        self.camera_name, int(elapsed), frame_count, fps,
-                    )
+                    logger.debug("status camera={} fps={:.1f} frames={} alerts={} uptime={:.0f}s",
+                                 self.camera_name, fps, frame_count, alert_count, elapsed)
                     t_last_summary = now
 
             except Exception:
@@ -142,8 +141,6 @@ class CameraWorker:
 
         # 退出统计
         elapsed = time.time() - t_start
-        logger.info(
-            "[{}] 停止 — 总帧数: {}, 运行: {:.0f}s, 平均 FPS: {:.1f}",
-            self.camera_name, frame_count, elapsed,
-            frame_count / elapsed if elapsed > 0 else 0,
-        )
+        logger.info("[{}] stop frames={} alerts={} uptime={:.0f}s fps={:.1f}",
+                    self.camera_name, frame_count, alert_count, elapsed,
+                    frame_count / elapsed if elapsed > 0 else 0)

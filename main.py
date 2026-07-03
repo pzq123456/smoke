@@ -29,7 +29,7 @@ class RTSPStreamer:
 
 def main():
     script_dir = Path(__file__).parent
-    model_path = script_dir / "runs" / "detect" / "yolo26m_smoking_20260626_0601" / "weights" / "best.pt"
+    model_path = script_dir / "runs" / "detect" / "yolo26m_smoking_20260702_1024" / "weights" / "best.pt"
     
     if not model_path.exists():
         print(f"错误：找不到模型文件 {model_path}"); return
@@ -39,8 +39,8 @@ def main():
     base_model = YOLO("yolo26n.pt", task="detect")
     smoking_model = YOLO(str(model_path), task="detect")
     
-    rtsp_url = "rtsp://118.140.234.166:8554/dahua1001722"
-    # rtsp_url = "0"  # 使用摄像头测试
+    # rtsp_url = "rtsp://118.140.234.166:8554/dahua1001722"
+    rtsp_url = "0"  # 使用摄像头测试
     streamer = RTSPStreamer(rtsp_url)
     time.sleep(1)
     
@@ -64,19 +64,35 @@ def main():
             # 2. 遍历检测到的人体，裁剪并判断是否在抽烟
             for box in boxes:
                 x1, y1, x2, y2 = map(int, box[:4])
+                p_conf = box[4]  # 读取人员置信度
                 x1, y1, x2, y2 = max(0, x1), max(0, y1), min(w, x2), min(h, y2)
                 
                 person_roi = frame[y1:y2, x1:x2]
                 is_smoking = False
                 
                 if person_roi.size > 0:
-                    # 局部区域检测抽烟动作
-                    smoke_res = smoking_model.predict(person_roi, conf=0.35, verbose=False, half=True, device=0)
+                    # 局部区域检测抽烟动作【已加入 imgsz=320 限制输入分辨率】
+                    smoke_res = smoking_model.predict(person_roi, conf=0.35, imgsz=320, verbose=False, half=True, device=0)
                     if len(smoke_res) > 0 and len(smoke_res[0].boxes) > 0:
                         is_smoking = True
+                        
+                        # 遍历并绘制局部检测到的“烟”目标框及其置信度
+                        for s_box in smoke_res[0].boxes.data.cpu().numpy():
+                            sx1, sy1, sx2, sy2 = map(int, s_box[:4])
+                            s_conf = s_box[4]
+                            # 将局部坐标还原到原图大图坐标系
+                            global_sx1 = x1 + sx1
+                            global_sy1 = y1 + sy1
+                            global_sx2 = x1 + sx2
+                            global_sy2 = y1 + sy2
+                            
+                            # 绘制烟的目标框和置信度标签 (使用黄色区分)
+                            cv2.rectangle(annotated_frame, (global_sx1, global_sy1), (global_sx2, global_sy2), (0, 255, 255), 2)
+                            cv2.putText(annotated_frame, f"smoke {s_conf:.2f}", (global_sx1, max(global_sy1 - 5, 20)), 
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
                 
-                # 3. 绘制人体框及上方标签
-                label = "SMOKING" if is_smoking else "Normal"
+                # 3. 绘制人体框及上方标签（带上人员置信度）
+                label = f"SMOKING {p_conf:.2f}" if is_smoking else f"Normal {p_conf:.2f}"
                 color = (0, 0, 255) if is_smoking else (0, 255, 0)
                 
                 cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)

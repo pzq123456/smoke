@@ -124,8 +124,7 @@ def main():
         level=log_cfg.get("level", "INFO"),
         log_file=log_cfg.get("file", "logs/server.log"),
     )
-    logger.info("=" * 60)
-    logger.info("抽烟检测服务端 启动中...")
+    logger.info("startup smoking_detection_server")
 
     # 3. 加载模型
     model_path = _PROJECT_ROOT / config["model"]["path"]
@@ -136,6 +135,7 @@ def main():
         device=config["model"].get("device", 0),
         person_model_path=person_cfg.get("path"),
         person_conf=person_cfg.get("conf", 0.4),
+        imgsz=config["model"].get("imgsz"),
     )
 
     # 4. 创建 Webhook 推送器（全局共享一个）
@@ -147,7 +147,7 @@ def main():
             timeout=webhook_cfg.get("timeout", 10),
             retries=webhook_cfg.get("retries", 2),
         )
-        logger.info("Webhook 已配置: {}", webhook_cfg["url"])
+        logger.debug("Webhook 已配置: {}", webhook_cfg["url"])
     else:
         logger.warning("未配置 Webhook URL，告警将不会推送")
 
@@ -156,19 +156,26 @@ def main():
     target_classes = config["model"].get("target_classes", ["smoking"])
     workers: list[CameraWorker] = []
 
+    webhook_url = webhook_cfg.get("url", "none") if webhook else "none"
     for cam in config["cameras"]:
         if not cam.get("enabled", True):
-            logger.info("[{}] 已禁用，跳过", cam.get("name", cam["id"]))
+            logger.debug("camera={}:{} disabled", cam["id"], cam.get("name", cam["id"]))
             continue
+
+        logger.info("startup camera={}:{} src={} webhook={} cooldown={}s min_hits={}",
+                    cam["id"], cam["name"], cam.get("type", "rtsp"),
+                    webhook_url,
+                    alert_cfg.get("cooldown_seconds", 30),
+                    alert_cfg.get("min_detection_count", 3))
 
         alert_mgr = AlertManager(
             camera_id=cam["id"],
             camera_name=cam["name"],
             target_classes=target_classes,
-
             save_frame_overlay=alert_cfg.get("save_frame_overlay", False),
             cooldown_seconds=alert_cfg.get("cooldown_seconds", 30),
             min_detection_count=alert_cfg.get("min_detection_count", 3),
+            debug_render=alert_cfg.get("debug_render", False),
             webhook=webhook,
         )
 
@@ -188,7 +195,7 @@ def main():
         logger.error("没有启用的摄像头，退出")
         return
 
-    logger.info("已启动 {} 路摄像头，运行中... (Ctrl+C 停止)", len(workers))
+    logger.info("running cameras={}", len(workers))
 
     # 6. 等待退出信号 + Worker 健康监控
     #    不使用 signal 模块（Windows 下与 GPU 线程交互时有不可靠问题），
@@ -210,13 +217,12 @@ def main():
                 t_last_health = now
 
     except KeyboardInterrupt:
-        logger.info("收到 Ctrl+C，准备退出...")
+        logger.info("shutdown signal=KeyboardInterrupt")
 
     # 7. 优雅退出
-    logger.info("正在停止所有 Worker...")
     for worker in workers:
         worker.stop()
-    logger.info("服务端已退出")
+    logger.info("shutdown cameras={}", len(workers))
 
 
 if __name__ == "__main__":

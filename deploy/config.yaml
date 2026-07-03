@@ -13,10 +13,11 @@
 # -----------------------------------------------------------------------------
 model:
   path: "/models/best.pt"                                            # 抽烟模型在容器内的路径（第二阶段）
+  imgsz: 320                                                          # 抽烟模型输入尺寸
   person_model:                                                      # 人体检测模型（第一阶段）
     path: "/models/yolo26n.pt"                                       # COCO 预训练，class 0 = person
-    conf: 0.4
-  conf: 0.6                                                         # 抽烟检测置信度阈值
+    conf: 0.5
+  conf: 0.7                                                           # 抽烟检测置信度阈值
   device: 0                                                          # GPU 设备 ID；"cpu" 表示 CPU
   target_classes: ['cigarette']                                      # 触发告警的目标类别名
 
@@ -36,6 +37,7 @@ cameras:
 # 告警参数
 # -----------------------------------------------------------------------------
 alert:
+  debug_render: false             # true=详细标注（cigarette位置+置信度），false=简洁标注（仅人体框+SMOKING）
   cooldown_seconds: 10            # 同摄像头两次告警最小间隔（秒）
   min_detection_count: 3          # 连续检测到目标的帧数阈值
   save_frame_overlay: false       # 是否在证据帧上叠加水印

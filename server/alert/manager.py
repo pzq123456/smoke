@@ -28,6 +28,7 @@ class AlertManager:
         save_frame_overlay: bool = False,
         cooldown_seconds: float = 30.0,
         min_detection_count: int = 3,
+        debug_render: bool = False,
         webhook: WebhookAlerter | None = None,
     ):
         """
@@ -38,6 +39,7 @@ class AlertManager:
             save_frame_overlay: 是否在证据帧上叠加摄像头名称/时间水印
             cooldown_seconds: 同一摄像头两次告警的最小间隔（秒）
             min_detection_count: 连续检测到抽烟的帧数阈值
+            debug_render: True=详细标注（cigarette位置+置信度），False=简洁标注（仅人体框+SMOKING）
             webhook: Webhook 推送实例，None 则不推送
         """
         self.camera_id = camera_id
@@ -46,6 +48,7 @@ class AlertManager:
         self.save_frame_overlay = save_frame_overlay
         self.cooldown_seconds = cooldown_seconds
         self.min_detection_count = min_detection_count
+        self.debug_render = debug_render
         self.webhook = webhook
 
         # 内部状态
@@ -77,13 +80,10 @@ class AlertManager:
 
             if smoking_detections:
                 self._consecutive_hits += 1
-                logger.debug(
-                    "[{}] 检测到目标: {} 个, 连续 {}/{} 帧",
-                    self.camera_name,
-                    len(smoking_detections),
-                    self._consecutive_hits,
-                    self.min_detection_count,
-                )
+                for d in smoking_detections:
+                    logger.debug("detect camera={} class={} conf={:.2f} hits={}/{}",
+                                 self.camera_name, d.class_name, d.confidence,
+                                 self._consecutive_hits, self.min_detection_count)
 
                 if self._consecutive_hits >= self.min_detection_count:
                     if self._cooldown_passed():
@@ -92,11 +92,16 @@ class AlertManager:
                         return True
                     else:
                         # 冷却中，重置计数器避免冷却结束后立即再次触发
+                        remain = self.cooldown_seconds - (time.time() - self._last_alert_time)
+                        logger.debug("skip camera={} reason=cooldown remain={:.0f}s",
+                                     self.camera_name, remain)
                         self._consecutive_hits = 0
             else:
                 # 无检测 → 递减计数器（逐步递减，容忍偶尔丢帧）
                 if self._consecutive_hits > 0:
                     self._consecutive_hits -= 1
+                    logger.debug("hits camera={} {}→{}", self.camera_name,
+                                 self._consecutive_hits + 1, self._consecutive_hits)
 
             return False
         except Exception:
@@ -114,25 +119,47 @@ class AlertManager:
     def _trigger(self, frame, detections: list[Detection]):
         """触发告警：标注帧 → base64 编码 → 推送 Webhook。"""
         now = datetime.now(timezone.utc)
-        timestamp_str = now.strftime("%Y%m%d_%H%M%S")
         iso_timestamp = now.isoformat()
 
-        logger.info(
-            "🚨 告警触发 [{}] {} 个目标",
-            self.camera_name, len(detections),
-        )
+        best_conf = max(d.confidence for d in detections)
+        best_class = max(detections, key=lambda d: d.confidence).class_name
+        logger.info("🚨 alert camera={} class={} conf={:.2f} hits={}/{}",
+                    self.camera_name, best_class, best_conf,
+                    self._consecutive_hits, self.min_detection_count)
 
         # 1. 标注检测框
         annotated = frame.copy()
         for d in detections:
             x1, y1, x2, y2 = d.bbox
+
+            # 人体框标签
+            if self.debug_render:
+                if d.person_confidence is not None:
+                    label = f"SMOKING p{d.person_confidence:.2f}"
+                else:
+                    label = f"{d.class_name} {d.confidence:.2f}"
+            else:
+                label = "SMOKING"
+
             cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 0, 255), 2)
-            label = f"{d.class_name} {d.confidence:.2f}"
-            cv2.putText(
-                annotated, label,
-                (x1, max(y1 - 8, 0)),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2,
-            )
+            cv2.putText(annotated, label, (x1, max(y1 - 8, 0)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+
+            # cigarette 子框（黄色，仅调试模式）
+            if self.debug_render and d.sub_detections:
+                for sub in d.sub_detections:
+                    sx1, sy1, sx2, sy2 = sub.bbox
+                    cv2.rectangle(annotated, (sx1, sy1), (sx2, sy2), (0, 255, 255), 2)
+                    cv2.putText(annotated, f"smoke {sub.confidence:.2f}",
+                                (sx1, max(sy1 - 5, 20)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+
+        # 调试模式：叠加连续帧计数器
+        if self.debug_render:
+            cv2.putText(annotated,
+                        f"hits: {self._consecutive_hits}/{self.min_detection_count}",
+                        (10, annotated.shape[0] - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
         # 2. 可选：叠加摄像头/时间水印
         if self.save_frame_overlay:
@@ -152,18 +179,32 @@ class AlertManager:
         frame_base64 = base64.b64encode(buffer).decode("utf-8")
 
         # 4. 构建告警 payload
+        detections_payload = []
+        for d in detections:
+            entry = {
+                "class": d.class_name,
+                "confidence": round(d.confidence, 3),
+                "bbox": list(d.bbox),
+            }
+            if self.debug_render:
+                entry["person_confidence"] = (
+                    round(d.person_confidence, 3) if d.person_confidence is not None else None
+                )
+                entry["sub_detections"] = [
+                    {
+                        "class": sub.class_name,
+                        "confidence": round(sub.confidence, 3),
+                        "bbox": list(sub.bbox),
+                    }
+                    for sub in (d.sub_detections or [])
+                ]
+            detections_payload.append(entry)
+
         payload = {
             "camera_id": self.camera_id,
             "camera_name": self.camera_name,
             "timestamp": iso_timestamp,
-            "detections": [
-                {
-                    "class": d.class_name,
-                    "confidence": round(d.confidence, 3),
-                    "bbox": list(d.bbox),
-                }
-                for d in detections
-            ],
+            "detections": detections_payload,
             "frame_base64": frame_base64,
         }
 

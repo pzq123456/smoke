@@ -8,11 +8,12 @@
 # 模型参数
 # -----------------------------------------------------------------------------
 model:
-  path: "runs/detect/yolo26m_smoking_20260626_0601/weights/best.pt"   # 抽烟模型权重路径（第二阶段，相对于项目根目录）
+  path: "runs/detect/yolo26m_smoking_20260702_1024/weights/best.pt"   # 抽烟模型权重路径（第二阶段，相对于项目根目录）
+  imgsz: 320                                                            # 抽烟模型输入尺寸（第二阶段/ROI推理时使用）
   person_model:                                                       # 可选：人体检测模型（第一阶段），不配置则回退为单阶段模式
     path: "yolo26n.pt"                                                # COCO 预训练模型，class 0 = person
-    conf: 0.4                                                         # 人体检测置信度阈值
-  conf: 0.35                                                           # 抽烟检测置信度阈值
+    conf: 0.5                                                         # 人体检测置信度阈值
+  conf: 0.7                                                           # 抽烟检测置信度阈值
   device: 0                                                            # GPU 设备 ID，null 或 "cpu" 表示 CPU
   target_classes: ['cigarette']                                         # 触发告警的目标类别（必须与模型类别名一致）
 
@@ -39,8 +40,9 @@ cameras:
 # 告警参数
 # -----------------------------------------------------------------------------
 alert:
+  debug_render: true             # true=详细标注（cigarette位置+置信度），false=简洁标注（仅人体框+SMOKING）
   cooldown_seconds: 10           # 同一摄像头两次告警的最小间隔（秒）
-  min_detection_count: 1         # 连续检测到抽烟的帧数阈值（防止单帧误报）
+  min_detection_count: 3         # 连续检测到抽烟的帧数阈值（防止单帧误报）
   save_frame_overlay: false      # 是否在证据帧上叠加摄像头名称/时间水印（摄像头流已自带则无需）
 
   webhook:

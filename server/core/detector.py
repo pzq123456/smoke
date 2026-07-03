@@ -12,11 +12,21 @@ from loguru import logger
 
 
 @dataclass
+class SubDetection:
+    """子检测结果（如 cigarette 在人体 ROI 内的位置，坐标为全帧坐标）。"""
+    class_name: str
+    confidence: float
+    bbox: tuple[int, int, int, int]  # (x1, y1, x2, y2) 全局坐标
+
+
+@dataclass
 class Detection:
     """单条检测结果。"""
     class_name: str        # 类别名称，如 "smoking"
     confidence: float      # 置信度 0-1
     bbox: tuple[int, int, int, int]  # (x1, y1, x2, y2)
+    person_confidence: float | None = None       # 第一阶段 person 置信度（仅两阶段模式）
+    sub_detections: list[SubDetection] | None = None  # cigarette 子检测列表（仅两阶段模式）
 
 
 class SmokeDetector:
@@ -34,6 +44,7 @@ class SmokeDetector:
         device: int | str | None = 0,
         person_model_path: str | Path | None = None,
         person_conf: float = 0.4,
+        imgsz: int | None = None,
     ):
         """
         Args:
@@ -44,6 +55,7 @@ class SmokeDetector:
             person_model_path: 可选的人体检测模型路径（COCO 预训练，class 0=person）。
                                配置后启用两阶段检测：先找人 → 再在人体 ROI 内检测抽烟。
             person_conf: 人体检测置信度阈值（默认 0.4）
+            imgsz: 抽烟模型输入尺寸（默认 None，走 YOLO 内部默认值 640）
         """
         model_path = Path(model_path)
         if not model_path.exists():
@@ -70,6 +82,7 @@ class SmokeDetector:
         # --- 可选：人体检测模型（第一阶段） ---
         self._person_model = None
         self._person_conf = person_conf
+        self._imgsz = imgsz
         if person_model_path is not None:
             person_model_path = Path(person_model_path)
             if not person_model_path.exists():
@@ -99,6 +112,7 @@ class SmokeDetector:
         results = self._model.predict(
             frame,
             conf=self._conf,
+            imgsz=self._imgsz,
             verbose=False,
             device=self._device,
         )
@@ -165,6 +179,7 @@ class SmokeDetector:
         # --- 第二阶段：逐人体 ROI 检测抽烟 ---
         for box in boxes_data:
             x1, y1, x2, y2 = map(int, box[:4])
+            p_conf = float(box[4])  # person 置信度
             x1, y1 = max(0, x1), max(0, y1)
             x2, y2 = min(w, x2), min(h, y2)
 
@@ -181,6 +196,7 @@ class SmokeDetector:
                 smoke_results = self._model.predict(
                     person_roi,
                     conf=self._conf,
+                    imgsz=self._imgsz,
                     verbose=False,
                     device=self._device,
                 )
@@ -197,6 +213,7 @@ class SmokeDetector:
             # 收集该 ROI 内所有有效抽烟检测，取最高置信度
             best_conf = 0.0
             best_class = None
+            sub_dets: list[SubDetection] = []
             for smoke_box in smoke_results[0].boxes:
                 cls_id = int(smoke_box.cls[0])
                 class_name = self._model.names.get(cls_id, str(cls_id))
@@ -208,17 +225,28 @@ class SmokeDetector:
                     if confidence < min_conf:
                         continue
 
+                # 子检测坐标映射到全局
+                sx1, sy1, sx2, sy2 = smoke_box.xyxy[0].tolist()
+                gx1, gy1 = x1 + int(sx1), y1 + int(sy1)
+                gx2, gy2 = x1 + int(sx2), y1 + int(sy2)
+                sub_dets.append(SubDetection(
+                    class_name=class_name,
+                    confidence=confidence,
+                    bbox=(gx1, gy1, gx2, gy2),
+                ))
+
                 if confidence > best_conf:
                     best_conf = confidence
                     best_class = class_name
 
-            # 若该人体区域检测到抽烟，以人体框作为输出（与 main.py 行为一致：
-            # 告警帧标注整个人体而非仅烟蒂，提供更清晰的上下文）
+            # 若该人体区域检测到抽烟，输出人体框 + 子检测列表
             if best_class is not None:
                 detections.append(Detection(
                     class_name=best_class,
                     confidence=best_conf,
                     bbox=(x1, y1, x2, y2),
+                    person_confidence=p_conf,
+                    sub_detections=sub_dets,
                 ))
 
         return detections
