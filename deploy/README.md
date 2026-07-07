@@ -2,6 +2,15 @@
 
 ## 快速开始
 
+改变端口映射，默认内部的 preview 运行在 8080，宿主机映射到 18080，避免与其他服务冲突。
+参见:
+
+```yaml
+    ports:
+      - "18080:8080"            # 视频流预览端口（需与 config.yaml preview.port 一致）
+    restart: unless-stopped
+```
+
 ### 1. 放入模型
 
 ```bash
@@ -133,6 +142,18 @@ cameras:
 |------|------|--------|------|
 | `level` | string | `"INFO"` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
 | `file` | string | `"/logs/server.log"` | 容器内日志路径（JSON，10MB 轮转，保留 30 天） |
+
+### preview — 视频流预览（可选）
+
+取消注释即启用；注释掉（默认）即关闭。无额外 `enabled` 开关。
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `host` | string | `"0.0.0.0"` | 绑定地址 |
+| `port` | int | `8080` | HTTP 端口（需与 docker-compose.yml 端口映射一致） |
+| `jpeg_quality` | int | `30` | JPEG 编码质量 1-100 |
+
+启用后访问 `http://<host>:<port>/stream/<camera_id>` 查看实时 MJPEG 视频流。
 
 ---
 

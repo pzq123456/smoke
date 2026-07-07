@@ -23,3 +23,5 @@ logs
 # Docker 部署工作区（运行时产出）
 deploy/models/*.pt
 deploy/logs/
+
+dataset

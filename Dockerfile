@@ -30,7 +30,10 @@ RUN pip install --no-cache-dir --break-system-packages \
     loguru \
     opencv-python \
     ultralytics \
-    pyyaml
+    pyyaml \
+    fastapi \
+    uvicorn \
+    simplejpeg
 
 # -- 应用代码 ------------------------------------------------------------------
 COPY server/ ./server/

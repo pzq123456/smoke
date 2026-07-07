@@ -40,4 +40,6 @@ services:
 
       # -- 日志（读写） --
       - ./logs:/logs
+    ports:
+      - "18080:8080"            # 视频流预览端口（需与 config.yaml preview.port 一致）
     restart: unless-stopped

@@ -17,7 +17,7 @@ model:
   person_model:                                                      # 人体检测模型（第一阶段）
     path: "/models/yolo26n.pt"                                       # COCO 预训练，class 0 = person
     conf: 0.5
-  conf: 0.7                                                           # 抽烟检测置信度阈值
+  conf: 0.8                                                           # 抽烟检测置信度阈值
   device: 0                                                          # GPU 设备 ID；"cpu" 表示 CPU
   target_classes: ['cigarette']                                      # 触发告警的目标类别名
 
@@ -43,9 +43,20 @@ alert:
   save_frame_overlay: false       # 是否在证据帧上叠加水印
 
   webhook:
-    url: "http://192.168.1.24:6034/protal/smoking-alarm/webhook"  # 更新 宿主机 webhook 接收器
+    # url: "http://192.168.1.24:6034/protal/smoking-alarm/webhook"  # 更新 宿主机 webhook 接收器
+    # http://localhost:9999/api/smoke-alert
+    url: "http://localhost:9999/api/smoke-alert"
     timeout: 10                                               # 请求超时（秒）
     retries: 2                                                # 失败重试次数
+
+# -----------------------------------------------------------------------------
+# 视频流预览（可选）
+# -----------------------------------------------------------------------------
+# 取消注释即启用 MJPEG 实时视频流；注释掉即关闭。
+preview:
+  host: "0.0.0.0"
+  port: 8080
+  jpeg_quality: 30
 
 # -----------------------------------------------------------------------------
 # 日志参数

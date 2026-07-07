@@ -11,6 +11,7 @@ import time
 from datetime import datetime, timezone
 
 import cv2
+import simplejpeg
 from loguru import logger
 
 from server.core.detector import Detection
@@ -174,8 +175,8 @@ class AlertManager:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2,
                 )
 
-        # 3. 编码为 base64
-        _, buffer = cv2.imencode(".jpg", annotated)
+        # 3. 编码为 base64（simplejpeg SIMD 加速）
+        buffer = simplejpeg.encode_jpeg(annotated, quality=85, colorspace='BGR')
         frame_base64 = base64.b64encode(buffer).decode("utf-8")
 
         # 4. 构建告警 payload

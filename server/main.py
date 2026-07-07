@@ -10,8 +10,9 @@
     1. 加载并校验 YAML 配置
     2. 初始化日志
     3. 加载 YOLO 模型（所有摄像头共享）
-    4. 为每个 enabled 的摄像头创建 CameraWorker
-    5. 等待退出信号，优雅关闭
+    4. 为每个 enabled 的摄像头创建 CameraWorker（可输出 MJPEG 预览帧）
+    5. 可选：启动 MJPEG 预览 HTTP 服务（preview 节存在时启用）
+    6. 等待退出信号，优雅关闭
 """
 
 import argparse
@@ -32,7 +33,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 from server.utils.logger import setup_logger
 from server.core.detector import SmokeDetector
 from server.core.streamer import RTSPStreamer, LocalStreamer
-from server.core.camera_worker import CameraWorker
+from server.core.camera_worker import CameraWorker  # 含可选 JPEG 输出能力
 from server.alert.webhook import WebhookAlerter
 from server.alert.manager import AlertManager
 
@@ -84,6 +85,19 @@ def _validate_config(config: dict, path: Path):
     if "alert" not in config:
         errors.append("缺少 'alert' 节")
 
+    # preview 节校验（可选，仅在存在时检查）
+    if "preview" in config:
+        preview = config["preview"]
+        if not isinstance(preview, dict):
+            errors.append("preview 必须是字典")
+        else:
+            port = preview.get("port")
+            if port is not None and not isinstance(port, int):
+                errors.append("preview.port 必须为整数")
+            jpeg_quality = preview.get("jpeg_quality")
+            if jpeg_quality is not None and not (isinstance(jpeg_quality, int) and 1 <= jpeg_quality <= 100):
+                errors.append("preview.jpeg_quality 必须为 1-100 的整数")
+
     if errors:
         msg = f"配置校验失败 ({path}):\n  " + "\n  ".join(errors)
         raise ValueError(msg)
@@ -101,6 +115,24 @@ def _create_streamer(cam: dict):
         return RTSPStreamer(rtsp_url=cam["rtsp_url"])
 
 
+def _start_preview_server(workers_dict: dict, preview_cfg: dict):
+    """启动预览 HTTP 服务器（daemon 线程）。"""
+    import threading
+    import uvicorn
+    from server.preview.app import create_app
+
+    preview_app = create_app(workers_dict)
+    threading.Thread(
+        target=lambda: uvicorn.run(
+            preview_app,
+            host=preview_cfg.get("host", "0.0.0.0"),
+            port=preview_cfg.get("port", 8080),
+            log_level="warning",
+        ),
+        daemon=True,
+    ).start()
+
+
 # ============================================================================
 # 主入口
 # ============================================================================
@@ -116,6 +148,9 @@ def main():
     # 1. 加载配置
     print(f"加载配置: {args.config}")
     config = load_config(args.config)
+
+    # 1.5 检测是否启用预览（有 preview 节 = 启用，无 = 关闭）
+    preview_cfg = config.get("preview")
 
     # 2. 初始化日志
     log_cfg = config.get("log", {})
@@ -154,7 +189,8 @@ def main():
     # 5. 启动摄像头 Workers
     alert_cfg = config.get("alert", {})
     target_classes = config["model"].get("target_classes", ["smoking"])
-    workers: list[CameraWorker] = []
+    workers: list = []
+    workers_dict: dict = {}  # preview 模式用
 
     webhook_url = webhook_cfg.get("url", "none") if webhook else "none"
     for cam in config["cameras"]:
@@ -187,13 +223,23 @@ def main():
             streamer=streamer,
             detector=detector,
             alert_manager=alert_mgr,
+            jpeg_quality=preview_cfg.get("jpeg_quality") if preview_cfg else None,
         )
-        worker.start()
+        if preview_cfg:
+            workers_dict[cam["id"]] = worker
+            # 不调用 start() — FastAPI lifespan 中注入 _loop 后启动
+        else:
+            worker.start()
+
         workers.append(worker)
 
     if not workers:
         logger.error("没有启用的摄像头，退出")
         return
+
+    # 5.5 启动预览 HTTP 服务器（daemon 线程，不阻塞主线程）
+    if preview_cfg:
+        _start_preview_server(workers_dict, preview_cfg)
 
     logger.info("running cameras={}", len(workers))
 
