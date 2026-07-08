@@ -41,5 +41,5 @@ services:
       # -- 日志（读写） --
       - ./logs:/logs
     ports:
-      - "18080:8080"            # 视频流预览端口（需与 config.yaml preview.port 一致）
+      - "18082:8080"            # 视频流预览端口 左侧为对外服务端口 右侧为 docker 内部
     restart: unless-stopped

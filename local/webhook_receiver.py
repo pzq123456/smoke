@@ -50,7 +50,12 @@ class WebhookHandler(BaseHTTPRequestHandler):
         _receive_count += 1
         count = _receive_count
 
-        # 1. 解码并保存证据帧
+        # 立即响应，避免磁盘 I/O / 日志输出阻塞发送端
+        self._respond(200, {"status": "ok", "received": count})
+
+        # ── 以下操作在 HTTP 响应之后执行，不影响发送端 ──
+
+        # 1. 解码并保存证据帧（base64 主动剥离，避免 JSONL 膨胀）
         frame_saved_to = None
         frame_b64 = payload.pop("frame_base64", None)
         if frame_b64 and _save_dir:
@@ -67,7 +72,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
             except Exception:
                 logger.exception("解码/保存帧失败")
 
-        # 2. 推送数据追加到 JSONL
+        # 2. 推送数据追加到 JSONL（不含 frame_base64，避免日志膨胀）
         if _payload_log:
             record = {
                 "received_at": datetime.now(timezone.utc).isoformat(),
@@ -77,9 +82,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
             with open(_payload_log, "a", encoding="utf-8") as f:
                 f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
 
-        # 3. 控制台摘要
-        self._print_summary(count, payload, frame_saved_to)
-        self._respond(200, {"status": "ok", "received": count, "frame_saved_to": frame_saved_to})
+        # 3. 控制台摘要（通过 logger，无阻塞 flush）
+        self._log_summary(count, payload, frame_saved_to)
 
     def do_GET(self):
         self._respond(200, {"service": "Webhook Receiver", "received_count": _receive_count})
@@ -92,22 +96,26 @@ class WebhookHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _print_summary(self, count, payload, frame_path):
-        sep = "-" * 60
-        detections = payload.get("detections", [])
-        print(f"\n{sep}\n Alert #{count}  <- {self.client_address[0]}\n{sep}")
-        print(f" Camera:   {payload.get('camera_name', '?')} ({payload.get('camera_id', '?')})")
-        print(f" Time:     {payload.get('timestamp', 'N/A')}")
-        print(f" Objects:  {len(detections)}")
-        for i, d in enumerate(detections[:10]):
+    def _log_summary(self, count, payload, frame_path):
+        """通过 logger 输出告警摘要，无阻塞 flush。"""
+        objects = payload.get("objects", [])  # 修复: 键名为 "objects" 而非 "detections"
+        logger.info(
+            "Alert #{} | Camera: {} ({}) | Objects: {} | Frame: {}",
+            count,
+            payload.get("camera_name", "?"),
+            payload.get("camera_id", "?"),
+            len(objects),
+            frame_path or "N/A",
+        )
+        for i, d in enumerate(objects[:10]):
             bbox = d.get("bbox", [])
-            print(f"   [{i+1}] {d.get('class','?')} conf={d.get('confidence',0):.2f} "
-                  f"bbox=[{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}]")
-        if len(detections) > 10:
-            print(f"   ... and {len(detections) - 10} more")
-        if frame_path:
-            print(f" Frame:    {frame_path}")
-        print(f"{sep}\n", flush=True)
+            logger.debug(
+                "  [{}/{}] {} conf={:.2f} bbox={}",
+                i + 1, len(objects), d.get("class", "?"),
+                d.get("confidence", 0), bbox,
+            )
+        if len(objects) > 10:
+            logger.debug("  ... and {} more", len(objects) - 10)
 
 
 # ── 入口 ──────────────────────────────────────────────────────────────────

@@ -10,7 +10,7 @@ from loguru import logger
 
 def create_app(workers: dict) -> FastAPI:
     """创建预览 FastAPI 应用。workers 由 main.py 创建并传入。"""
-    app = FastAPI(title="吸烟检测预览", version="0.3.0")
+    app = FastAPI(title="吸烟检测预览", version="0.4.0")
     app.state.workers = workers
 
     @app.get("/health")
@@ -21,28 +21,37 @@ def create_app(workers: dict) -> FastAPI:
 
     @app.get("/stream/{camera_id}")
     async def stream_mjpeg(camera_id: str, request: Request):
-        """MJPEG 实时视频流."""
+        """MJPEG 实时视频流。
+
+        通过 asyncio.Queue 接收 CameraWorker 预览管线推送的 JPEG 帧。
+        Queue(maxsize=1) 保证始终获取最新帧，旧帧自动丢弃。
+        """
         w = request.app.state.workers.get(camera_id)
         if w is None:
             raise HTTPException(status_code=404, detail=f"Camera '{camera_id}' not found")
 
+        if w._preview_queue is None:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Camera '{camera_id}' 未启用预览模式",
+            )
+
         async def generate():
-            last_version = -1
             try:
                 while w.is_running:
-                    await w._frame_ready.wait()
-                    w._frame_ready.clear()
-                    if w._frame_version == last_version:
-                        continue
-                    last_version = w._frame_version
-                    body = w._latest_jpeg_bytes
-                    if body is None:
-                        continue
-                    yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + body + b'\r\n')
+                    body = await w._preview_queue.get()
+                    if body is None:  # 终止哨兵
+                        break
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' +
+                           body + b'\r\n')
             except asyncio.CancelledError:
                 pass
 
-        return StreamingResponse(generate(), media_type='multipart/x-mixed-replace; boundary=frame')
+        return StreamingResponse(
+            generate(),
+            media_type='multipart/x-mixed-replace; boundary=frame',
+        )
 
     @asynccontextmanager
     async def lifespan(app_instance: FastAPI):
