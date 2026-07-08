@@ -35,7 +35,7 @@ class CameraWorker:
     JPEG 编码在 executor 线程，base64/HTTP 推送由 daemon 线程 fire-and-forget。
     """
 
-    DEFAULT_PREVIEW_FPS: float = 15.0
+    DEFAULT_PREVIEW_FPS: float = 24
 
     def __init__(
         self,
